@@ -8,7 +8,7 @@ use rand::{XorShiftRng, Rng, SeedableRng};
 const PLANET_RADIUS: Scalar = 6.371e6;
 const GRAVITATIONAL_PARAMETER: Scalar = 3.9860044181e14;
 const TIMESTEP: Scalar = 1e-4;
-const DESIRED_ORBIT: Scalar = PLANET_RADIUS + 380e3;
+const DESIRED_ORBIT: Scalar = PLANET_RADIUS + 210e3;
 
 const SHIP_MASS: Scalar = 500.0;
 const INITIAL_FUEL: Scalar = 50.0;
@@ -16,20 +16,23 @@ const MAX_FLOW_RATE: Scalar = 100.0 * 1e-3;
 const MAX_THRUST: Scalar = 270.0;
 const MIN_THRUST: Scalar = 0.0; // Actually 180.0
 
+const CROSS_SECTION_RADIUS: Scalar = 1.5;
+const CROSS_SECTION_AREA: Scalar = 3.14159 * CROSS_SECTION_RADIUS * CROSS_SECTION_RADIUS;
+const SPHERE_DRAG_COEFFICIENT: Scalar = 0.5;
+
 const NUM_TIMESTEPS: usize = 10_000_000_000;
 
 const SEEDS: [u64; 4] = [1, 2, 3, 4];
 
 
 // https://en.wikipedia.org/wiki/Atmospheric_pressure
-const SEA_PRESSURE: Scalar = 101325.0;
-const TEMPERATURE_LAPSE_RATE: Scalar = -0.002;
-const SEA_TEMPERATURE: Scalar = 288.15;
-const SURFACE_GRAVITY_ACCELERATION: Scalar = (GRAVITATIONAL_PARAMETER /
-                                              (PLANET_RADIUS * PLANET_RADIUS));
-const MOLAR_MASS: Scalar = 0.0289644;
-const GAS_CONSTANT: Scalar = 8.31447;
-const BASE_LAYER: Scalar = 11e3;
+const AIR_GAS_CONSTANT: Scalar = 287.0;
+
+const DENSITY_A: Scalar = 1.225;
+const DENSITY_K: Scalar = 1.38785564661078223780e-4;
+
+const PRESSURE_A: Scalar = 1.013e5;
+const PRESSURE_K: Scalar = 1.42881643880405620386e-4;
 
 
 #[derive(Copy, Clone, Debug)]
@@ -42,11 +45,9 @@ pub struct Atmosphere {
 impl Atmosphere {
     pub fn at(distance: Scalar) -> Atmosphere {
         let height = distance - PLANET_RADIUS;
-        let temperature = TEMPERATURE_LAPSE_RATE / SEA_TEMPERATURE * height;
-        let pressure = SEA_PRESSURE * (
-            -height * (SURFACE_GRAVITY_ACCELERATION *
-                       MOLAR_MASS / (GAS_CONSTANT * SEA_TEMPERATURE))).exp();
-        let density = pressure / temperature * (MOLAR_MASS / GAS_CONSTANT);
+        let pressure = PRESSURE_A * (-PRESSURE_K * height).exp();
+        let density = DENSITY_A * (-DENSITY_K * height).exp();
+        let temperature = pressure / (AIR_GAS_CONSTANT * density);
 
         Atmosphere {
             pressure: pressure,
@@ -101,7 +102,7 @@ fn simulate<C: Controller>(index: usize, _seed: u64, mut controller: C) -> End {
 
     let mut state = ShipState {
         position: Vec3(0.0, 0.0, DESIRED_ORBIT),
-        velocity: Vec3((GRAVITATIONAL_PARAMETER / DESIRED_ORBIT).sqrt() * 0.988, 0.0, 0.0),
+        velocity: Vec3((GRAVITATIONAL_PARAMETER / DESIRED_ORBIT).sqrt(), 0.0, 0.0),
         fuel: INITIAL_FUEL,
         time: 0.0
     };
@@ -115,7 +116,7 @@ fn simulate<C: Controller>(index: usize, _seed: u64, mut controller: C) -> End {
         let distance_from_orbit =
             (state.position.0 * state.position.0 + state.position.2 * state.position.2).sqrt() -
             DESIRED_ORBIT;
-        error += distance_from_orbit * distance_from_orbit;
+        error += distance_from_orbit * distance_from_orbit * TIMESTEP;
 
         let speed_squared = state.velocity.norm_squared();
         let speed = speed_squared.sqrt();
@@ -123,10 +124,10 @@ fn simulate<C: Controller>(index: usize, _seed: u64, mut controller: C) -> End {
 
         let distance_squared = state.position.norm_squared();
         let distance = distance_squared.sqrt();
+        let atmosphere = Atmosphere::at(distance);
 
         let crashed = distance <= PLANET_RADIUS;
-
-        if crashed || (i_timestep % 50_000_000 == 0) {
+        if crashed || (i_timestep % 1_000_000 == 0) {
             let mass = state.total_mass();
             let energy = (state.velocity.norm_squared() * 0.5 -
                           GRAVITATIONAL_PARAMETER / distance) * mass;
@@ -135,7 +136,7 @@ fn simulate<C: Controller>(index: usize, _seed: u64, mut controller: C) -> End {
                      index, i_timestep, energy, error,
                      (distance - PLANET_RADIUS) / 1000.0,
                      travelled / 1000.0, state.velocity.norm() / 1000.0,
-                     Atmosphere::at(distance),
+                     atmosphere,
                      state);
         }
 
@@ -155,6 +156,8 @@ fn simulate<C: Controller>(index: usize, _seed: u64, mut controller: C) -> End {
 
         let mut acceleration = state.position * (-GRAVITATIONAL_PARAMETER /
                                                  (distance_squared * distance));
+        let drag = SPHERE_DRAG_COEFFICIENT * CROSS_SECTION_AREA * atmosphere.density * speed;
+        acceleration -= drag * state.velocity;
         if state.fuel > 0.0 {
             let requested_thrust = controller.requested_thrust(&state);
             let requested_thrust_norm_squared = requested_thrust.norm_squared();
