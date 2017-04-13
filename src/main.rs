@@ -8,7 +8,7 @@ use rand::{XorShiftRng, Rng, SeedableRng};
 const PLANET_RADIUS: Scalar = 6.371e6;
 const GRAVITATIONAL_PARAMETER: Scalar = 3.9860044181e14;
 const TIMESTEP: Scalar = 1e-4;
-const DESIRED_ORBIT: Scalar = PLANET_RADIUS + 210e3;
+const DESIRED_ORBIT: Scalar = PLANET_RADIUS + 200e3;
 
 const SHIP_MASS: Scalar = 500.0;
 const INITIAL_FUEL: Scalar = 50.0;
@@ -75,12 +75,12 @@ impl ShipState {
 }
 
 pub trait Controller {
-    fn requested_thrust(&mut self, state: &ShipState) -> Vec3;
+    fn requested_thrust(&mut self, atmosphere: &Atmosphere, state: &ShipState) -> Vec3;
 }
 
 pub struct NoopController;
 impl Controller for NoopController {
-    fn requested_thrust(&mut self, _state: &ShipState) -> Vec3 {
+    fn requested_thrust(&mut self, _atmosphere: &Atmosphere, _state: &ShipState) -> Vec3 {
         Vec3(0.0, 0.0, 0.0)
     }
 }
@@ -154,12 +154,14 @@ fn simulate<C: Controller>(index: usize, _seed: u64, mut controller: C) -> End {
         }
 
 
-        let mut acceleration = state.position * (-GRAVITATIONAL_PARAMETER /
-                                                 (distance_squared * distance));
-        let drag = SPHERE_DRAG_COEFFICIENT * CROSS_SECTION_AREA * atmosphere.density * speed;
-        acceleration -= drag * state.velocity;
+        let mut acceleration =
+            state.position * (-GRAVITATIONAL_PARAMETER / (distance_squared * distance));
+        let mut forces =
+            -SPHERE_DRAG_COEFFICIENT * CROSS_SECTION_AREA * atmosphere.density * speed *
+            state.velocity;
+        let mut mass = state.total_mass();
         if state.fuel > 0.0 {
-            let requested_thrust = controller.requested_thrust(&state);
+            let requested_thrust = controller.requested_thrust(&atmosphere, &state);
             let requested_thrust_norm_squared = requested_thrust.norm_squared();
             if requested_thrust_norm_squared > 0.0 {
                 let requested_thrust_norm = requested_thrust_norm_squared.sqrt();
@@ -172,13 +174,17 @@ fn simulate<C: Controller>(index: usize, _seed: u64, mut controller: C) -> End {
                 };
 
                 let fuel_consumption = thrust_norm * timestep_flow_rate_per_newton;
-                acceleration += thrust / (state.total_mass() - fuel_consumption / 2.0);
+
+                mass -= fuel_consumption / 2.0;
+                forces += thrust;
+
                 state.fuel -= fuel_consumption;
                 if state.fuel <= 0.0 {
                     println!("{}: {:9}: Out of fuel! {:?}", index, i_timestep, state);
                 }
             }
         }
+        acceleration += forces / mass;
         state.velocity += acceleration * TIMESTEP;
         state.position += state.velocity * (TIMESTEP * 0.5);
         state.time += TIMESTEP * 0.5;
