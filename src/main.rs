@@ -23,8 +23,8 @@ const CROSS_SECTION_AREA: Scalar = 3.14159 * CROSS_SECTION_RADIUS * CROSS_SECTIO
 const SPHERE_DRAG_COEFFICIENT: Scalar = 0.5;
 
 const RANDOM_MOMENTUM_FREQUENCY: Scalar = 1.0 * 60.0 * 60.0; // Every hour get hit by something.
-const RANDOM_MOMENTUM_MEAN: Scalar = 5e2;
-const RANDOM_MOMENTUM_STD: Scalar = 1e2;
+const RANDOM_MOMENTUM_MEAN: Scalar = 3e2;
+const RANDOM_MOMENTUM_STD: Scalar = 1e1;
 
 
 const NUM_TIMESTEPS: usize = 1_000_000_000;
@@ -151,6 +151,7 @@ fn simulate<C: Controller>(index: usize, _seed: u64, mut controller: C) -> End {
 
     let mut num_hits = 0;
     let mut last_momentum = 0.0;
+    let mut last_momentum_theta: Scalar = 0.0;
 
     for i_timestep in 1..NUM_TIMESTEPS + 1 {
         state.time += TIMESTEP * 0.5;
@@ -187,7 +188,7 @@ fn simulate<C: Controller>(index: usize, _seed: u64, mut controller: C) -> End {
                      Speed: {:.5}km/s\n\
                      Atmosphere: {:.5e}Pa, {:.2}C, {:.5e}kg/m^3\n\
                      Fuel: {:.2}kg\n\
-                     Hits: {} (last: {}kg*m/s)\n\
+                     Hits: {} (last: {:.2}kg*m/s, theta: {:.2} deg)\n\
                      Position: {:?}\n\
                      Velocity: {:?}\n\n",
                      index,
@@ -206,6 +207,7 @@ fn simulate<C: Controller>(index: usize, _seed: u64, mut controller: C) -> End {
                      state.fuel,
                      num_hits,
                      last_momentum,
+                     last_momentum_theta.to_degrees(),
                      state.position,
                      state.velocity);
         }
@@ -224,8 +226,12 @@ fn simulate<C: Controller>(index: usize, _seed: u64, mut controller: C) -> End {
         }
 
         if rng.gen::<f64>() <= (TIMESTEP / RANDOM_MOMENTUM_FREQUENCY) {
-            let momentum = rng.gen::<Vec3>() * RANDOM_MOMENTUM_STD + RANDOM_MOMENTUM_MEAN;
+            let momentum = rng.gen::<Vec3>().normalised() *
+                           (rng.gen::<StandardNormal>().0 * RANDOM_MOMENTUM_STD +
+                            RANDOM_MOMENTUM_MEAN);
             last_momentum = momentum.norm();
+            let dot = momentum.dot(&state.velocity);
+            last_momentum_theta = (dot / (last_momentum * speed)).acos() * dot.signum();
             num_hits += 1;
             state.velocity += momentum / SHIP_MASS;
         }
@@ -352,143 +358,143 @@ impl<'a> Neg for &'a Vec3 {
 }
 
 macro_rules! impl_ops {
-        ($([$op:ident :: $fun:ident, $op_assign:ident :: $fun_assign:ident],)+) => {
-            $(
-                impl $op for Vec3 {
-                    type Output = Vec3;
+    ($([$op:ident :: $fun:ident, $op_assign:ident :: $fun_assign:ident],)+) => {
+        $(
+            impl $op for Vec3 {
+                type Output = Vec3;
 
-                    fn $fun(self, rhs: Vec3) -> Vec3 {
-                        Vec3($op::$fun(self.0, rhs.0),
-                        $op::$fun(self.1, rhs.1),
-                        $op::$fun(self.2, rhs.2))
-                    }
+                fn $fun(self, rhs: Vec3) -> Vec3 {
+                    Vec3($op::$fun(self.0, rhs.0),
+                    $op::$fun(self.1, rhs.1),
+                    $op::$fun(self.2, rhs.2))
                 }
+            }
 
-                impl<'a> $op<Vec3> for &'a Vec3 {
-                    type Output = Vec3;
+            impl<'a> $op<Vec3> for &'a Vec3 {
+                type Output = Vec3;
 
-                    fn $fun(self, rhs: Vec3) -> Vec3 {
-                        $op::$fun(*self, rhs)
-                    }
+                fn $fun(self, rhs: Vec3) -> Vec3 {
+                    $op::$fun(*self, rhs)
                 }
+            }
 
-                impl<'a> $op<&'a Vec3> for Vec3 {
-                    type Output = Vec3;
+            impl<'a> $op<&'a Vec3> for Vec3 {
+                type Output = Vec3;
 
-                    fn $fun(self, rhs: &'a Vec3) -> Vec3 {
-                        $op::$fun(self, *rhs)
-                    }
+                fn $fun(self, rhs: &'a Vec3) -> Vec3 {
+                    $op::$fun(self, *rhs)
                 }
+            }
 
-                impl<'a, 'b> $op<&'a Vec3> for &'b Vec3 {
-                    type Output = Vec3;
+            impl<'a, 'b> $op<&'a Vec3> for &'b Vec3 {
+                type Output = Vec3;
 
-                    fn $fun(self, rhs: &'a Vec3) -> Vec3 {
-                        $op::$fun(*self, *rhs)
-                    }
+                fn $fun(self, rhs: &'a Vec3) -> Vec3 {
+                    $op::$fun(*self, *rhs)
                 }
+            }
 
-                impl $op<Scalar> for Vec3 {
-                    type Output = Vec3;
+            impl $op<Scalar> for Vec3 {
+                type Output = Vec3;
 
-                    fn $fun(self, rhs: Scalar) -> Vec3 {
-                        Vec3($op::$fun(self.0, rhs),
-                        $op::$fun(self.1, rhs),
-                        $op::$fun(self.2, rhs))
-                    }
+                fn $fun(self, rhs: Scalar) -> Vec3 {
+                    Vec3($op::$fun(self.0, rhs),
+                    $op::$fun(self.1, rhs),
+                    $op::$fun(self.2, rhs))
                 }
+            }
 
-                impl<'a> $op<Scalar> for &'a Vec3 {
-                    type Output = Vec3;
+            impl<'a> $op<Scalar> for &'a Vec3 {
+                type Output = Vec3;
 
-                    fn $fun(self, rhs: Scalar) -> Vec3 {
-                        $op::$fun(*self, rhs)
-                    }
+                fn $fun(self, rhs: Scalar) -> Vec3 {
+                    $op::$fun(*self, rhs)
                 }
+            }
 
-                impl<'a> $op<&'a Scalar> for Vec3 {
-                    type Output = Vec3;
+            impl<'a> $op<&'a Scalar> for Vec3 {
+                type Output = Vec3;
 
-                    fn $fun(self, rhs: &'a Scalar) -> Vec3 {
-                        $op::$fun(self, *rhs)
-                    }
+                fn $fun(self, rhs: &'a Scalar) -> Vec3 {
+                    $op::$fun(self, *rhs)
                 }
+            }
 
-                impl<'a, 'b> $op<&'a Scalar> for &'b Vec3 {
-                    type Output = Vec3;
+            impl<'a, 'b> $op<&'a Scalar> for &'b Vec3 {
+                type Output = Vec3;
 
-                    fn $fun(self, rhs: &'a Scalar) -> Vec3 {
-                        $op::$fun(*self, *rhs)
-                    }
+                fn $fun(self, rhs: &'a Scalar) -> Vec3 {
+                    $op::$fun(*self, *rhs)
                 }
+            }
 
-                impl $op<Vec3> for Scalar {
-                    type Output = Vec3;
+            impl $op<Vec3> for Scalar {
+                type Output = Vec3;
 
-                    fn $fun(self, rhs: Vec3) -> Vec3 {
-                        Vec3($op::$fun(self, rhs.0),
-                        $op::$fun(self, rhs.1),
-                        $op::$fun(self, rhs.2))
-                    }
+                fn $fun(self, rhs: Vec3) -> Vec3 {
+                    Vec3($op::$fun(self, rhs.0),
+                    $op::$fun(self, rhs.1),
+                    $op::$fun(self, rhs.2))
                 }
+            }
 
-                impl<'a> $op<Vec3> for &'a Scalar {
-                    type Output = Vec3;
+            impl<'a> $op<Vec3> for &'a Scalar {
+                type Output = Vec3;
 
-                    fn $fun(self, rhs: Vec3) -> Vec3 {
-                        $op::$fun(*self, rhs)
-                    }
+                fn $fun(self, rhs: Vec3) -> Vec3 {
+                    $op::$fun(*self, rhs)
                 }
+            }
 
-                impl<'a> $op<&'a Vec3> for Scalar {
-                    type Output = Vec3;
+            impl<'a> $op<&'a Vec3> for Scalar {
+                type Output = Vec3;
 
-                    fn $fun(self, rhs: &'a Vec3) -> Vec3 {
-                        $op::$fun(self, *rhs)
-                    }
+                fn $fun(self, rhs: &'a Vec3) -> Vec3 {
+                    $op::$fun(self, *rhs)
                 }
+            }
 
-                impl<'a, 'b> $op<&'a Vec3> for &'b Scalar {
-                    type Output = Vec3;
+            impl<'a, 'b> $op<&'a Vec3> for &'b Scalar {
+                type Output = Vec3;
 
-                    fn $fun(self, rhs: &'a Vec3) -> Vec3 {
-                        $op::$fun(*self, *rhs)
-                    }
+                fn $fun(self, rhs: &'a Vec3) -> Vec3 {
+                    $op::$fun(*self, *rhs)
                 }
+            }
 
-                impl $op_assign for Vec3 {
-                    fn $fun_assign(&mut self, rhs: Vec3) {
-                        $op_assign::$fun_assign(&mut self.0, rhs.0);
-                        $op_assign::$fun_assign(&mut self.1, rhs.1);
-                        $op_assign::$fun_assign(&mut self.2, rhs.2);
-                    }
+            impl $op_assign for Vec3 {
+                fn $fun_assign(&mut self, rhs: Vec3) {
+                    $op_assign::$fun_assign(&mut self.0, rhs.0);
+                    $op_assign::$fun_assign(&mut self.1, rhs.1);
+                    $op_assign::$fun_assign(&mut self.2, rhs.2);
                 }
+            }
 
-                impl<'a> $op_assign<&'a Vec3> for Vec3 {
-                    fn $fun_assign(&mut self, rhs: &'a Vec3) {
-                        $op_assign::$fun_assign(self, *rhs);
-                    }
+            impl<'a> $op_assign<&'a Vec3> for Vec3 {
+                fn $fun_assign(&mut self, rhs: &'a Vec3) {
+                    $op_assign::$fun_assign(self, *rhs);
                 }
+            }
 
-                impl $op_assign<Scalar> for Vec3 {
-                    fn $fun_assign(&mut self, rhs: Scalar) {
-                        $op_assign::$fun_assign(&mut self.0, rhs);
-                        $op_assign::$fun_assign(&mut self.1, rhs);
-                        $op_assign::$fun_assign(&mut self.2, rhs);
-                    }
+            impl $op_assign<Scalar> for Vec3 {
+                fn $fun_assign(&mut self, rhs: Scalar) {
+                    $op_assign::$fun_assign(&mut self.0, rhs);
+                    $op_assign::$fun_assign(&mut self.1, rhs);
+                    $op_assign::$fun_assign(&mut self.2, rhs);
                 }
+            }
 
-                impl<'a> $op_assign<&'a Scalar> for Vec3 {
-                    fn $fun_assign(&mut self, rhs: &'a Scalar) {
-                        $op_assign::$fun_assign(self, *rhs);
-                    }
+            impl<'a> $op_assign<&'a Scalar> for Vec3 {
+                fn $fun_assign(&mut self, rhs: &'a Scalar) {
+                    $op_assign::$fun_assign(self, *rhs);
                 }
-                )+
-        }
+            }
+            )+
     }
+}
 impl_ops! {
-        [Add::add, AddAssign::add_assign],
-        [Sub::sub, SubAssign::sub_assign],
-        [Mul::mul, MulAssign::mul_assign],
-        [Div::div, DivAssign::div_assign],
-    }
+    [Add::add, AddAssign::add_assign],
+    [Sub::sub, SubAssign::sub_assign],
+    [Mul::mul, MulAssign::mul_assign],
+    [Div::div, DivAssign::div_assign],
+}
